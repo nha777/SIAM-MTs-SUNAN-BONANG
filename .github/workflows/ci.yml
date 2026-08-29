@@ -1,0 +1,100 @@
+name: SIAM CI
+
+on:
+  push:
+    branches: [ "main", "develop" ]
+  pull_request:
+    branches: [ "main", "develop" ]
+
+jobs:
+  laravel-pint:
+    name: Code Styling (Pint)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, json, dom, curl
+
+      - name: Install Dependencies
+        run: composer install --no-progress --no-suggest --prefer-dist
+
+      - name: Run Pint Check
+        run: vendor/bin/pint --test
+
+  phpstan-analysis:
+    name: Static Analysis (PHPStan)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, json, dom, curl, sqlite, pdo_sqlite
+          coverage: none
+
+      - name: Copy .env
+        run: php -r "file_exists('.env') || copy('.env.example', '.env');"
+
+      - name: Install Dependencies
+        run: composer install --no-progress --no-suggest --prefer-dist
+
+      - name: Generate App Key
+        run: php artisan key:generate
+
+      - name: Run PHPStan
+        run: vendor/bin/phpstan analyse --error-format=github
+
+  pest-tests:
+    name: Unit & Feature Tests (Pest)
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mariadb:10.11
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: yes
+          MYSQL_DATABASE: siam_testing
+        ports:
+          - 3306:3306
+        options: --health-cmd="healthcheck.sh --connect --innodb_initialized" --health-interval=10s --health-timeout=5s --health-retries=3
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, json, dom, curl, mysql, pdo_mysql
+          coverage: none
+
+      - name: Copy .env
+        run: cp .env.example .env
+
+      - name: Configure Test Environment
+        run: |
+          sed -i 's/DB_CONNECTION=.*/DB_CONNECTION=mysql/g' .env
+          sed -i 's/DB_HOST=.*/DB_HOST=127.0.0.1/g' .env
+          sed -i 's/DB_PORT=.*/DB_PORT=3306/g' .env
+          sed -i 's/DB_DATABASE=.*/DB_DATABASE=siam_testing/g' .env
+          sed -i 's/DB_USERNAME=.*/DB_USERNAME=root/g' .env
+          sed -i 's/DB_PASSWORD=.*/DB_PASSWORD=/g' .env
+
+      - name: Install Dependencies
+        run: composer install --no-progress --no-suggest --prefer-dist
+
+      - name: Generate App Key
+        run: php artisan key:generate
+
+      - name: Run Migrations
+        run: php artisan migrate --env=testing --force
+
+      - name: Run Pest Tests
+        run: vendor/bin/pest
